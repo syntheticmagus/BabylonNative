@@ -1,5 +1,6 @@
 #include "RuntimeImpl.h"
 
+#include <Babylon/JsRuntime.h>
 #include "NativeEngine.h"
 #include "NativeWindow.h"
 #include "XMLHttpRequest.h"
