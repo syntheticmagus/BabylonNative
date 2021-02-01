@@ -1,7 +1,9 @@
 #pragma once
 
 #include <napi/env.h>
+
 #include <functional>
+#include <mutex>
 
 template<typename RuntimeT>
 class InputManager final : public Napi::ObjectWrap<InputManager<RuntimeT>>
@@ -10,46 +12,45 @@ public:
     class InputBuffer
     {
     public:
-        InputBuffer(RuntimeT& rt)
-            : m_runtime{ rt }
+        InputBuffer(RuntimeT&)
         {}
         InputBuffer(const InputBuffer&) = delete;
         InputBuffer& operator=(const InputBuffer&) = delete;
 
         void SetPointerPosition(int x, int y)
         {
-            m_runtime.Dispatch([x, y, this](Napi::Env)
-            {
-                m_pointerX = x;
-                m_pointerY = y;
-            });
+            std::scoped_lock lock{m_mutex};
+
+            m_pointerX = x;
+            m_pointerY = y;
         }
 
         void SetPointerDown(bool isPointerDown)
         {
-            m_runtime.Dispatch([isPointerDown, this](Napi::Env)
-            {
-                m_isPointerDown = isPointerDown;
-            });
+            std::scoped_lock lock{m_mutex};
+            m_isPointerDown = isPointerDown;
         }
 
-        int GetPointerX() const
+        int GetPointerX()
         {
+            std::scoped_lock lock{m_mutex};
             return m_pointerX;
         }
 
-        int GetPointerY() const
+        int GetPointerY()
         {
+            std::scoped_lock lock{m_mutex};
             return m_pointerY;
         }
 
-        bool IsPointerDown() const
+        bool IsPointerDown()
         {
+            std::scoped_lock lock{m_mutex};
             return m_isPointerDown;
         }
 
     private:
-        RuntimeT& m_runtime;
+        std::mutex m_mutex{};
 
         int m_pointerX{};
         int m_pointerY{};
