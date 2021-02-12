@@ -195,15 +195,20 @@ namespace Babylon
         m_beforeRenderScheduler.m_dispatcher.tick(m_cancellationSource);
     }
 
-    void Graphics::Impl::FinishRenderingCurrentFrame()
+    bool Graphics::Impl::TryFinishRenderingCurrentFrame(uint32_t milliseconds)
     {
         assert(m_renderThreadAffinity.check());
 
-        m_safeTimespanGuarantor.EndSafeTimespan();
+        if (!m_safeTimespanGuarantor.TryEndSafeTimespan(milliseconds))
+        {
+            return false;
+        }
 
         Frame();
 
         m_afterRenderScheduler.m_dispatcher.tick(m_cancellationSource);
+        
+        return true;
     }
 
     Graphics::Impl::UpdateToken Graphics::Impl::GetUpdateToken()

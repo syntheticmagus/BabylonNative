@@ -76,7 +76,7 @@ namespace Babylon
         void DisableRendering();
 
         void StartRenderingCurrentFrame();
-        void FinishRenderingCurrentFrame();
+        bool TryFinishRenderingCurrentFrame(uint32_t milliseconds);
 
         UpdateToken GetUpdateToken();
 

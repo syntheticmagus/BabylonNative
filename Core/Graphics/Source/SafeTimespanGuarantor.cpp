@@ -13,20 +13,40 @@ namespace Babylon
         m_lock.reset();
     }
 
-    void SafeTimespanGuarantor::EndSafeTimespan()
+    bool SafeTimespanGuarantor::TryEndSafeTimespan(int32_t milliseconds)
     {
-        bool wait{false};
-        do
+        m_lock.emplace(m_mutex);
+        if (m_postCount == 0)
         {
-            m_lock.emplace(m_mutex);
-            wait = m_postCount > 0;
-            --m_postCount;
+            return true;
+        }
+        m_lock.reset();
 
-            if (wait)
+        auto start = std::chrono::steady_clock::now();
+        bool waitSucceed = m_semaphore.wait(milliseconds);
+        auto stop = std::chrono::steady_clock::now();
+        
+        if (waitSucceed)
+        {
+            // TODO: There are tricks we can use to avoid this excess lock.
+            m_lock.emplace(m_mutex);
+            --m_postCount;
+            m_lock.reset();
+
+            // If milliseconds is nonnegative, reduce it by the time already waited, being careful 
+            // not to go negative because that will cause bx::semaphore::wait() to become indefinitely
+            // blocking.
+            if (milliseconds >= 0)
             {
-                m_lock.reset();
+                auto waitTimeMillis = static_cast<int32_t>(std::chrono::duration_cast<std::chrono::milliseconds>(stop - start).count());
+                milliseconds = std::max(milliseconds - waitTimeMillis, 0);
             }
-        } while (wait && m_semaphore.wait());
+            return TryEndSafeTimespan(milliseconds);
+        }
+        else
+        {
+            return false;
+        }
     }
 
     SafeTimespanGuarantor::SafetyGuarantee SafeTimespanGuarantor::GetSafetyGuarantee()

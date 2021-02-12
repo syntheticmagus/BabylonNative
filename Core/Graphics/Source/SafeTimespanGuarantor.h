@@ -26,7 +26,7 @@ namespace Babylon
         SafeTimespanGuarantor();
 
         void BeginSafeTimespan();
-        void EndSafeTimespan();
+        bool TryEndSafeTimespan(int32_t milliseconds = -1);
 
         using SafetyGuarantee = decltype(std::declval<Semaphore>().GetPostFinalAction());
         SafetyGuarantee GetSafetyGuarantee();

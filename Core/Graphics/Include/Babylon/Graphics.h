@@ -27,7 +27,7 @@ namespace Babylon
         void DisableRendering();
 
         void StartRenderingCurrentFrame();
-        void FinishRenderingCurrentFrame();
+        bool TryFinishRenderingCurrentFrame(int32_t milliseconds = -1);
 
         void SetDiagnosticOutput(std::function<void(const char* output)> outputFunction);
 

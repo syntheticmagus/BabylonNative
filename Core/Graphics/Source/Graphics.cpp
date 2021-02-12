@@ -66,9 +66,9 @@ namespace Babylon
         m_impl->StartRenderingCurrentFrame();
     }
 
-    void Graphics::FinishRenderingCurrentFrame()
+    bool Graphics::TryFinishRenderingCurrentFrame(int32_t milliseconds)
     {
-        m_impl->FinishRenderingCurrentFrame();
+        return m_impl->TryFinishRenderingCurrentFrame(milliseconds);
     }
 
     void Graphics::SetDiagnosticOutput(std::function<void(const char* output)> outputFunction)

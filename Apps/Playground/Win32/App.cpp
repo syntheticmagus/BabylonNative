@@ -30,6 +30,7 @@ std::unique_ptr<Babylon::Graphics> graphics{};
 std::unique_ptr<InputManager<Babylon::AppRuntime>::InputBuffer> inputBuffer{};
 bool minimized{false};
 bool suspended;
+bool rendering;
 
 // Forward declarations of functions included in this code module:
 ATOM MyRegisterClass(HINSTANCE hInstance);
@@ -84,7 +85,7 @@ namespace
     {
         if (graphics)
         {
-            graphics->FinishRenderingCurrentFrame();
+            graphics->TryFinishRenderingCurrentFrame();
         }
 
         inputBuffer.reset();
@@ -107,6 +108,7 @@ namespace
 
         graphics = Babylon::Graphics::CreateGraphics<void*>(hWnd, width, height);
         graphics->StartRenderingCurrentFrame();
+        rendering = true;
 
         runtime = std::make_unique<Babylon::AppRuntime>();
         suspended = false;
@@ -309,9 +311,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         {
             if (graphics)
             {
-                if (!suspended)
+                if (rendering && !suspended)
                 {
-                    graphics->FinishRenderingCurrentFrame();
+                    rendering = !graphics->TryFinishRenderingCurrentFrame(0);
                 }
                 if (minimized && !suspended)
                 {
@@ -323,9 +325,10 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                     runtime->Resume();
                     suspended = false;
                 }
-                if (!suspended)
+                if (!rendering && !suspended)
                 {
                     graphics->StartRenderingCurrentFrame();
+                    rendering = true;
                 }
             }
 
