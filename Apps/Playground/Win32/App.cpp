@@ -28,6 +28,8 @@ WCHAR szWindowClass[MAX_LOADSTRING]; // the main window class name
 std::unique_ptr<Babylon::AppRuntime> runtime{};
 std::unique_ptr<Babylon::Graphics> graphics{};
 std::unique_ptr<InputManager<Babylon::AppRuntime>::InputBuffer> inputBuffer{};
+bool minimized{false};
+bool suspended;
 
 // Forward declarations of functions included in this code module:
 ATOM MyRegisterClass(HINSTANCE hInstance);
@@ -107,6 +109,8 @@ namespace
         graphics->StartRenderingCurrentFrame();
 
         runtime = std::make_unique<Babylon::AppRuntime>();
+        suspended = false;
+
         inputBuffer = std::make_unique<InputManager<Babylon::AppRuntime>::InputBuffer>(*runtime);
 
         runtime->Dispatch([width, height, hWnd](Napi::Env env) {
@@ -275,11 +279,11 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         {
             if ((wParam & 0xFFF0) == SC_MINIMIZE)
             {
-                runtime->Suspend();
+                minimized = true;
             }
             else if ((wParam & 0xFFF0) == SC_RESTORE)
             {
-                runtime->Resume();
+                minimized = false;
             }
             DefWindowProc(hWnd, message, wParam, lParam);
             break;
@@ -305,8 +309,24 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         {
             if (graphics)
             {
-                graphics->FinishRenderingCurrentFrame();
-                graphics->StartRenderingCurrentFrame();
+                if (!suspended)
+                {
+                    graphics->FinishRenderingCurrentFrame();
+                }
+                if (minimized && !suspended)
+                {
+                    runtime->Suspend();
+                    suspended = true;
+                }
+                else if (!minimized && suspended)
+                {
+                    runtime->Resume();
+                    suspended = false;
+                }
+                if (!suspended)
+                {
+                    graphics->StartRenderingCurrentFrame();
+                }
             }
 
             PAINTSTRUCT ps;
