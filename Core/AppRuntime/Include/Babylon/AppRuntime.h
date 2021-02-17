@@ -17,9 +17,6 @@ namespace Babylon
         AppRuntime(std::function<void(std::exception_ptr)> unhandledExceptionHandler);
         ~AppRuntime();
 
-        void Suspend();
-        void Resume();
-
         void Dispatch(std::function<void(Napi::Env)> callback);
 
     private:

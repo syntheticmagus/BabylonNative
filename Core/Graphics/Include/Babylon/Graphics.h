@@ -26,6 +26,10 @@ namespace Babylon
         void EnableRendering();
         void DisableRendering();
 
+        class CallbackToken;
+        std::unique_ptr<CallbackToken> AddUpdateStartedCallback(std::function<void()> callback);
+        void WaitForUpdateStarted();
+
         void StartRenderingCurrentFrame();
         bool TryFinishRenderingCurrentFrame(int32_t milliseconds = -1);
 
@@ -41,5 +45,52 @@ namespace Babylon
         Graphics(Graphics&&) = delete;
 
         std::unique_ptr<Impl> m_impl{};
+    };
+
+    class GraphicsThread
+    {
+    public:
+        template<typename... Ts>
+        GraphicsThread(Ts... args)
+            : GraphicsThread(Graphics::CreateGraphics(args...))
+        {
+        }
+
+        GraphicsThread(std::unique_ptr<Graphics> graphics)
+            : m_graphics{std::move(graphics)}
+            , m_continue{true}
+            , m_thread{[this]() { Run(); }}
+        {
+        }
+
+        ~GraphicsThread()
+        {
+            m_continue = false;
+            m_thread.join();
+        }
+
+        Graphics& GetGraphics()
+        {
+            return *m_graphics;
+        }
+
+    private:
+        std::unique_ptr<Graphics> m_graphics;
+        std::atomic<bool> m_continue{};
+        std::thread m_thread{};
+
+        void Run()
+        {
+            m_graphics->EnableRendering();
+
+            while (m_continue)
+            {
+                m_graphics->StartRenderingCurrentFrame();
+                m_graphics->WaitForUpdateStarted();
+                m_graphics->TryFinishRenderingCurrentFrame();
+            }
+
+            m_graphics->DisableRendering();
+        }
     };
 }

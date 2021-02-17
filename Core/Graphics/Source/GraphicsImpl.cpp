@@ -28,7 +28,7 @@ namespace Babylon
 {
     Graphics::Impl::UpdateToken::UpdateToken(Graphics::Impl& graphicsImpl)
         : m_graphicsImpl(graphicsImpl)
-        , m_guarantee{m_graphicsImpl.m_safeTimespanGuarantor.GetSafetyGuarantee()}
+        , m_guarantee{m_graphicsImpl.m_safeTimespanGuarantor->GetSafetyGuarantee()}
     {
     }
 
@@ -64,14 +64,6 @@ namespace Babylon
     Graphics::Impl::Impl()
         : m_bgfxCallback{[this](const auto& data) { CaptureCallback(data); }}
     {
-        // Set the thread affinity (all other rendering operations must happen on this thread).
-        m_renderThreadAffinity = std::this_thread::get_id();
-
-        if (!g_bgfxRenderFrameCalled)
-        {
-            bgfx::renderFrame();
-        }
-
         std::scoped_lock lock{m_state.Mutex};
         m_state.Bgfx.Initialized = false;
 
@@ -133,6 +125,7 @@ namespace Babylon
 
     Graphics::Impl::RenderScheduler& Graphics::Impl::BeforeRenderScheduler()
     {
+        TrySignalUpdateStarted();
         return m_beforeRenderScheduler;
     }
 
@@ -143,7 +136,14 @@ namespace Babylon
 
     void Graphics::Impl::EnableRendering()
     {
-        assert(m_renderThreadAffinity.check());
+        // Set the thread affinity (all other rendering operations must happen on this thread).
+        m_renderThreadAffinity = std::this_thread::get_id();
+
+        if (!g_bgfxRenderFrameCalled)
+        {
+            bgfx::renderFrame();
+            g_bgfxRenderFrameCalled = true;
+        }
 
         std::scoped_lock lock{m_state.Mutex};
 
@@ -159,6 +159,8 @@ namespace Babylon
 
             m_frameBufferManager = std::make_unique<FrameBufferManager>();
         }
+
+        m_safeTimespanGuarantor = std::make_unique<SafeTimespanGuarantor>();
     }
 
     void Graphics::Impl::DisableRendering()
@@ -178,6 +180,22 @@ namespace Babylon
 
             m_renderThreadAffinity = {};
         }
+
+        m_safeTimespanGuarantor.reset();
+    }
+
+    arcana::ticketed_collection<std::function<void()>>::ticket Graphics::Impl::AddUpdateStartedCallback(std::function<void()> callback)
+    {
+        return m_updateStartedCallbacks.insert(std::move(callback), m_updateStartedCallbacksMutex);
+    }
+
+    void Graphics::Impl::WaitForUpdateStarted()
+    {
+        std::unique_lock lock{m_updateStartedMutex};
+        if (!m_updateStarted)
+        {
+            m_updateStartedConditionVariable.wait(lock);
+        }
     }
 
     void Graphics::Impl::StartRenderingCurrentFrame()
@@ -190,7 +208,12 @@ namespace Babylon
         // Update bgfx state if necessary.
         UpdateBgfxState();
 
-        m_safeTimespanGuarantor.BeginSafeTimespan();
+        {
+            std::scoped_lock lock{m_updateStartedMutex};
+            m_updateStarted = false;
+        }
+
+        m_safeTimespanGuarantor->BeginSafeTimespan();
 
         m_beforeRenderScheduler.m_dispatcher.tick(m_cancellationSource);
     }
@@ -199,7 +222,7 @@ namespace Babylon
     {
         assert(m_renderThreadAffinity.check());
 
-        if (!m_safeTimespanGuarantor.TryEndSafeTimespan(milliseconds))
+        if (!m_safeTimespanGuarantor->TryEndSafeTimespan(milliseconds))
         {
             return false;
         }
@@ -207,13 +230,17 @@ namespace Babylon
         Frame();
 
         m_afterRenderScheduler.m_dispatcher.tick(m_cancellationSource);
-        
+
         return true;
     }
 
     Graphics::Impl::UpdateToken Graphics::Impl::GetUpdateToken()
     {
-        return {*this};
+        Graphics::Impl::UpdateToken token{*this};
+
+        TrySignalUpdateStarted();
+
+        return token;
     }
 
     void Graphics::Impl::SetDiagnosticOutput(std::function<void(const char* output)> diagnosticOutput)
@@ -361,5 +388,27 @@ namespace Babylon
         {
             callback(data);
         }
+    }
+
+    bool Graphics::Impl::TrySignalUpdateStarted()
+    {
+        std::scoped_lock updateStartedLock{m_updateStartedMutex};
+        if (m_updateStarted)
+        {
+            return false;
+        }
+
+        {
+            std::scoped_lock updateStartedCallbacksLock{m_updateStartedCallbacksMutex};
+            for (const auto& callback : m_updateStartedCallbacks)
+            {
+                callback();
+            }
+        }
+
+        m_updateStarted = true;
+        m_updateStartedConditionVariable.notify_all();
+
+        return true;
     }
 }

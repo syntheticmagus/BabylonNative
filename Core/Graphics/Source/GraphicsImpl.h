@@ -75,6 +75,10 @@ namespace Babylon
         void EnableRendering();
         void DisableRendering();
 
+        arcana::ticketed_collection<std::function<void()>>::ticket AddUpdateStartedCallback(std::function<void()>);
+
+        void WaitForUpdateStarted();
+
         void StartRenderingCurrentFrame();
         bool TryFinishRenderingCurrentFrame(uint32_t milliseconds);
 
@@ -100,6 +104,7 @@ namespace Babylon
         bgfx::Encoder* GetEncoderForThread();
         void EndEncoders();
         void CaptureCallback(const BgfxCallback::CaptureData&);
+        bool TrySignalUpdateStarted();
 
         arcana::affinity m_renderThreadAffinity{};
 
@@ -126,7 +131,7 @@ namespace Babylon
 
         BgfxCallback m_bgfxCallback;
 
-        SafeTimespanGuarantor m_safeTimespanGuarantor{};
+        std::unique_ptr<SafeTimespanGuarantor> m_safeTimespanGuarantor{};
 
         RenderScheduler m_beforeRenderScheduler;
         RenderScheduler m_afterRenderScheduler;
@@ -135,6 +140,13 @@ namespace Babylon
 
         std::mutex m_captureCallbacksMutex{};
         arcana::ticketed_collection<std::function<void(const BgfxCallback::CaptureData&)>> m_captureCallbacks{};
+
+        std::mutex m_updateStartedMutex{};
+        std::condition_variable m_updateStartedConditionVariable{};
+        bool m_updateStarted{};
+
+        std::mutex m_updateStartedCallbacksMutex{};
+        arcana::ticketed_collection<std::function<void()>> m_updateStartedCallbacks{};
 
         std::map<std::thread::id, bgfx::Encoder*> m_threadIdToEncoder{};
         std::mutex m_threadIdToEncoderMutex{};

@@ -32,16 +32,12 @@ namespace Babylon
             });
         }
 
-        void Suspend();
-        void Resume();
         void Run(Napi::Env);
 
     private:
         std::optional<Napi::Env> m_env{};
 
         std::mutex m_appendMutex{};
-
-        std::optional<std::scoped_lock<std::mutex>> m_suspensionLock{};
 
         arcana::cancellation_source m_cancelSource{};
         arcana::task<void, std::error_code> m_task = arcana::task_from_result<std::error_code>();

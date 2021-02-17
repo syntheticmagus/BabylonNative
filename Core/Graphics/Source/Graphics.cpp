@@ -3,6 +3,18 @@
 
 namespace Babylon
 {
+    class Graphics::CallbackToken
+    {
+    public:
+        using TicketT = arcana::ticketed_collection<std::function<void()>>::ticket;
+        CallbackToken(TicketT ticket)
+            : m_ticket(std::move(ticket))
+        {
+        }
+
+    private:
+        TicketT m_ticket;
+    };
 
     Graphics::Graphics()
         : m_impl{std::make_unique<Impl>()}
@@ -59,6 +71,16 @@ namespace Babylon
     void Graphics::DisableRendering()
     {
         m_impl->DisableRendering();
+    }
+
+    std::unique_ptr<Graphics::CallbackToken> Graphics::AddUpdateStartedCallback(std::function<void()> callback)
+    {
+        return std::make_unique<Graphics::CallbackToken>(m_impl->AddUpdateStartedCallback(std::move(callback)));
+    }
+
+    void Graphics::WaitForUpdateStarted()
+    {
+        m_impl->WaitForUpdateStarted();
     }
 
     void Graphics::StartRenderingCurrentFrame()

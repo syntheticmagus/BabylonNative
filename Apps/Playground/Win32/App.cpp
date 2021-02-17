@@ -26,11 +26,8 @@ HINSTANCE hInst;                     // current instance
 WCHAR szTitle[MAX_LOADSTRING];       // The title bar text
 WCHAR szWindowClass[MAX_LOADSTRING]; // the main window class name
 std::unique_ptr<Babylon::AppRuntime> runtime{};
-std::unique_ptr<Babylon::Graphics> graphics{};
+std::unique_ptr<Babylon::GraphicsThread> graphics{};
 std::unique_ptr<InputManager<Babylon::AppRuntime>::InputBuffer> inputBuffer{};
-bool minimized{false};
-bool suspended;
-bool rendering;
 
 // Forward declarations of functions included in this code module:
 ATOM MyRegisterClass(HINSTANCE hInstance);
@@ -83,11 +80,6 @@ namespace
 
     void Uninitialize()
     {
-        if (graphics)
-        {
-            graphics->TryFinishRenderingCurrentFrame();
-        }
-
         inputBuffer.reset();
         runtime.reset();
         graphics.reset();
@@ -106,17 +98,14 @@ namespace
         auto width = static_cast<size_t>(rect.right - rect.left);
         auto height = static_cast<size_t>(rect.bottom - rect.top);
 
-        graphics = Babylon::Graphics::CreateGraphics<void*>(hWnd, width, height);
-        graphics->StartRenderingCurrentFrame();
-        rendering = true;
+        graphics = std::make_unique<Babylon::GraphicsThread>(static_cast<void*>(hWnd), width, height);
 
         runtime = std::make_unique<Babylon::AppRuntime>();
-        suspended = false;
 
         inputBuffer = std::make_unique<InputManager<Babylon::AppRuntime>::InputBuffer>(*runtime);
 
         runtime->Dispatch([width, height, hWnd](Napi::Env env) {
-            graphics->AddToJavaScript(env);
+            graphics->GetGraphics().AddToJavaScript(env);
 
             Babylon::Polyfills::Console::Initialize(env, [](const char* message, auto) {
                 OutputDebugStringA(message);
@@ -167,7 +156,7 @@ namespace
 
     void UpdateWindowSize(size_t width, size_t height)
     {
-        graphics->UpdateSize(width, height);
+        graphics->GetGraphics().UpdateSize(width, height);
     }
 }
 
@@ -279,14 +268,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
     {
         case WM_SYSCOMMAND:
         {
-            if ((wParam & 0xFFF0) == SC_MINIMIZE)
-            {
-                minimized = true;
-            }
-            else if ((wParam & 0xFFF0) == SC_RESTORE)
-            {
-                minimized = false;
-            }
             DefWindowProc(hWnd, message, wParam, lParam);
             break;
         }
@@ -309,29 +290,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         }
         case WM_PAINT:
         {
-            if (graphics)
-            {
-                if (rendering && !suspended)
-                {
-                    rendering = !graphics->TryFinishRenderingCurrentFrame(0);
-                }
-                if (minimized && !suspended)
-                {
-                    runtime->Suspend();
-                    suspended = true;
-                }
-                else if (!minimized && suspended)
-                {
-                    runtime->Resume();
-                    suspended = false;
-                }
-                if (!rendering && !suspended)
-                {
-                    graphics->StartRenderingCurrentFrame();
-                    rendering = true;
-                }
-            }
-
             PAINTSTRUCT ps;
             BeginPaint(hWnd, &ps);
             EndPaint(hWnd, &ps);

@@ -25,16 +25,6 @@ namespace Babylon
         m_workQueue->Run(env);
     }
 
-    void AppRuntime::Suspend()
-    {
-        m_workQueue->Suspend();
-    }
-
-    void AppRuntime::Resume()
-    {
-        m_workQueue->Resume();
-    }
-
     void AppRuntime::Dispatch(std::function<void(Napi::Env)> func)
     {
         m_workQueue->Append(std::move(func));
