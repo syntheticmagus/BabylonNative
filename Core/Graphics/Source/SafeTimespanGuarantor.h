@@ -2,8 +2,8 @@
 
 #include <gsl/gsl>
 
-#include <mutex>
 #include <condition_variable>
+#include <mutex>
 
 #include <arcana/threading/affinity.h>
 
@@ -21,10 +21,10 @@ namespace Babylon
         SafetyGuarantee GetSafetyGuarantee();
 
     private:
-        arcana::affinity m_affinity{};
         uint32_t m_count{};
         std::mutex m_mutex{};
-        std::unique_lock<std::mutex> m_lock{};
-        std::condition_variable m_condition{};
+        std::condition_variable m_safetyCondition{};
+        std::condition_variable m_endCondition{};
+        bool m_inSafeTimespan{};
     };
 }
