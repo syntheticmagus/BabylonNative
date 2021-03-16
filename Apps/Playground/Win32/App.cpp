@@ -26,7 +26,6 @@ HINSTANCE hInst;                     // current instance
 WCHAR szTitle[MAX_LOADSTRING];       // The title bar text
 WCHAR szWindowClass[MAX_LOADSTRING]; // the main window class name
 std::unique_ptr<Babylon::AppRuntime> runtime{};
-std::unique_ptr<Babylon::Graphics> graphics{};
 std::unique_ptr<InputManager<Babylon::AppRuntime>::InputBuffer> inputBuffer{};
 bool minimized{false};
 
@@ -38,6 +37,43 @@ INT_PTR CALLBACK About(HWND, UINT, WPARAM, LPARAM);
 
 namespace
 {
+    class GraphicsThread
+    {
+    public:
+        template<typename... Ts>
+        GraphicsThread(Ts... args)
+            : m_graphics{Babylon::Graphics::CreateGraphics<Ts...>(args...)}
+            , m_thread{[this]() { Run(); }}
+        {
+        }
+
+        ~GraphicsThread()
+        {
+            m_cancelled = true;
+            m_thread.join();
+        }
+
+        Babylon::Graphics& Graphics()
+        {
+            return *m_graphics;
+        }
+
+    private:
+        std::unique_ptr<Babylon::Graphics> m_graphics;
+        std::thread m_thread{};
+        std::atomic<bool> m_cancelled{false};
+
+        void Run()
+        {
+            while (!m_cancelled)
+            {
+                m_graphics->StartRenderingCurrentFrame();
+                m_graphics->FinishRenderingCurrentFrame();
+            }
+        }
+    };
+    std::unique_ptr<GraphicsThread> graphicsThread{};
+
     std::filesystem::path GetModulePath()
     {
         char buffer[1024];
@@ -81,14 +117,9 @@ namespace
 
     void Uninitialize()
     {
-        if (graphics)
-        {
-            graphics->FinishRenderingCurrentFrame();
-        }
-
         inputBuffer.reset();
         runtime.reset();
-        graphics.reset();
+        graphicsThread.reset();
     }
 
     void RefreshBabylon(HWND hWnd)
@@ -104,14 +135,13 @@ namespace
         auto width = static_cast<size_t>(rect.right - rect.left);
         auto height = static_cast<size_t>(rect.bottom - rect.top);
 
-        graphics = Babylon::Graphics::CreateGraphics<void*>(hWnd, width, height);
-        graphics->StartRenderingCurrentFrame();
-
+        graphicsThread = std::make_unique<GraphicsThread>(reinterpret_cast<void*>(hWnd), width, height);
+        
         runtime = std::make_unique<Babylon::AppRuntime>();
         inputBuffer = std::make_unique<InputManager<Babylon::AppRuntime>::InputBuffer>(*runtime);
 
         runtime->Dispatch([width, height, hWnd](Napi::Env env) {
-            graphics->AddToJavaScript(env);
+            graphicsThread->Graphics().AddToJavaScript(env);
 
             Babylon::Polyfills::Console::Initialize(env, [](const char* message, auto) {
                 OutputDebugStringA(message);
@@ -162,7 +192,7 @@ namespace
 
     void UpdateWindowSize(size_t width, size_t height)
     {
-        graphics->UpdateSize(width, height);
+        graphicsThread->Graphics().UpdateSize(width, height);
     }
 }
 
@@ -200,12 +230,6 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         }
         else
         {
-            if (graphics)
-            {
-                graphics->FinishRenderingCurrentFrame();
-                graphics->StartRenderingCurrentFrame();
-            }
-
             result = PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE) && msg.message != WM_QUIT;
         }
 
@@ -296,11 +320,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         {
             if ((wParam & 0xFFF0) == SC_MINIMIZE)
             {
-                if (graphics)
-                {
-                    graphics->FinishRenderingCurrentFrame();
-                }
-
                 runtime->Suspend();
 
                 minimized = true;
@@ -310,11 +329,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 minimized = false;
 
                 runtime->Resume();
-
-                if (graphics)
-                {
-                    graphics->StartRenderingCurrentFrame();
-                }
             }
             DefWindowProc(hWnd, message, wParam, lParam);
             break;
@@ -338,7 +352,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         }
         case WM_SIZE:
         {
-            if (graphics)
+            if (graphicsThread)
             {
                 auto width = static_cast<size_t>(LOWORD(lParam));
                 auto height = static_cast<size_t>(HIWORD(lParam));
