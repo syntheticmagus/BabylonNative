@@ -80,11 +80,19 @@ namespace Babylon
 
     Graphics::Impl::RenderScheduler& Graphics::Impl::BeforeRenderScheduler()
     {
+        std::scoped_lock lock{m_methodsCalledMutex};
+        m_beforeRenderSchedulerCalled = true;
+        m_methodsCalledCondition.notify_one();
+
         return m_beforeRenderScheduler;
     }
 
     Graphics::Impl::RenderScheduler& Graphics::Impl::AfterRenderScheduler()
     {
+        std::scoped_lock lock{m_methodsCalledMutex};
+        m_afterRenderSchedulerCalled = true;
+        m_methodsCalledCondition.notify_one();
+
         return m_afterRenderScheduler;
     }
 
@@ -155,6 +163,11 @@ namespace Babylon
         UpdateBgfxState();
 
         m_safeTimespanGuarantor.BeginSafeTimespan();
+        
+        {
+            std::scoped_lock lock{m_methodsCalledMutex};
+            m_beforeRenderSchedulerCalled = false;
+        }
 
         m_beforeRenderScheduler.m_dispatcher.tick(*m_cancellationSource);
     }
@@ -168,17 +181,41 @@ namespace Babylon
             throw std::runtime_error{"Current frame cannot be finished prior to having been started."};
         }
 
+        {
+            std::scoped_lock lock{m_methodsCalledMutex};
+            m_getUpdateTokenCalled = false;
+        }
+
         m_safeTimespanGuarantor.EndSafeTimespan();
 
         Frame();
+
+        {
+            std::scoped_lock lock{m_methodsCalledMutex};
+            m_afterRenderSchedulerCalled = false;
+        }
 
         m_afterRenderScheduler.m_dispatcher.tick(*m_cancellationSource);
 
         m_rendering = false;
     }
 
+    void Graphics::Impl::WaitForWorkToDo()
+    {
+        std::unique_lock lock{m_methodsCalledMutex};
+        const auto predicate{[this]() { return m_beforeRenderSchedulerCalled || m_afterRenderSchedulerCalled || m_getUpdateTokenCalled; }};
+        if (!predicate())
+        {
+            m_methodsCalledCondition.wait(lock, predicate);
+        }
+    }
+
     Graphics::Impl::UpdateToken Graphics::Impl::GetUpdateToken()
     {
+        std::scoped_lock lock{m_methodsCalledMutex};
+        m_getUpdateTokenCalled = true;
+        m_methodsCalledCondition.notify_one();
+
         return {*this};
     }
 

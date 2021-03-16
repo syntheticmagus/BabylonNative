@@ -25,6 +25,7 @@
 HINSTANCE hInst;                     // current instance
 WCHAR szTitle[MAX_LOADSTRING];       // The title bar text
 WCHAR szWindowClass[MAX_LOADSTRING]; // the main window class name
+std::unique_ptr<Babylon::Graphics> graphics{};
 std::unique_ptr<Babylon::AppRuntime> runtime{};
 std::unique_ptr<InputManager<Babylon::AppRuntime>::InputBuffer> inputBuffer{};
 bool minimized{false};
@@ -40,9 +41,8 @@ namespace
     class GraphicsThread
     {
     public:
-        template<typename... Ts>
-        GraphicsThread(Ts... args)
-            : m_graphics{Babylon::Graphics::CreateGraphics<Ts...>(args...)}
+        GraphicsThread(Babylon::Graphics& g)
+            : m_graphics{g}
             , m_thread{[this]() { Run(); }}
         {
         }
@@ -53,23 +53,24 @@ namespace
             m_thread.join();
         }
 
-        Babylon::Graphics& Graphics()
-        {
-            return *m_graphics;
-        }
-
     private:
-        std::unique_ptr<Babylon::Graphics> m_graphics;
+        Babylon::Graphics& m_graphics;
         std::thread m_thread{};
         std::atomic<bool> m_cancelled{false};
 
         void Run()
         {
+            m_graphics.EnableRendering();
+
             while (!m_cancelled)
             {
-                m_graphics->StartRenderingCurrentFrame();
-                m_graphics->FinishRenderingCurrentFrame();
+                m_graphics.WaitForWorkToDo();
+
+                m_graphics.StartRenderingCurrentFrame();
+                m_graphics.FinishRenderingCurrentFrame();
             }
+
+            m_graphics.DisableRendering();
         }
     };
     std::unique_ptr<GraphicsThread> graphicsThread{};
@@ -119,7 +120,9 @@ namespace
     {
         inputBuffer.reset();
         runtime.reset();
+
         graphicsThread.reset();
+        graphics.reset();
     }
 
     void RefreshBabylon(HWND hWnd)
@@ -134,14 +137,15 @@ namespace
 
         auto width = static_cast<size_t>(rect.right - rect.left);
         auto height = static_cast<size_t>(rect.bottom - rect.top);
+        graphics = Babylon::Graphics::CreateGraphics<void*>(hWnd, width, height);
 
-        graphicsThread = std::make_unique<GraphicsThread>(reinterpret_cast<void*>(hWnd), width, height);
+        graphicsThread = std::make_unique<GraphicsThread>(*graphics);
         
         runtime = std::make_unique<Babylon::AppRuntime>();
         inputBuffer = std::make_unique<InputManager<Babylon::AppRuntime>::InputBuffer>(*runtime);
 
         runtime->Dispatch([width, height, hWnd](Napi::Env env) {
-            graphicsThread->Graphics().AddToJavaScript(env);
+            graphics->AddToJavaScript(env);
 
             Babylon::Polyfills::Console::Initialize(env, [](const char* message, auto) {
                 OutputDebugStringA(message);
@@ -192,7 +196,7 @@ namespace
 
     void UpdateWindowSize(size_t width, size_t height)
     {
-        graphicsThread->Graphics().UpdateSize(width, height);
+        graphics->UpdateSize(width, height);
     }
 }
 

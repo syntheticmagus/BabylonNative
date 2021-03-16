@@ -29,6 +29,8 @@ namespace Babylon
         void StartRenderingCurrentFrame();
         void FinishRenderingCurrentFrame();
 
+        void WaitForWorkToDo();
+
         void SetDiagnosticOutput(std::function<void(const char* output)> outputFunction);
 
         float GetHardwareScalingLevel();

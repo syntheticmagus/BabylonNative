@@ -73,6 +73,8 @@ namespace Babylon
         void StartRenderingCurrentFrame();
         void FinishRenderingCurrentFrame();
 
+        void WaitForWorkToDo();
+
         UpdateToken GetUpdateToken();
 
         FrameBuffer& AddFrameBuffer(bgfx::FrameBufferHandle handle, uint16_t width, uint16_t height, bool backBuffer);
@@ -141,5 +143,11 @@ namespace Babylon
 
         std::map<std::thread::id, bgfx::Encoder*> m_threadIdToEncoder{};
         std::mutex m_threadIdToEncoderMutex{};
+
+        bool m_beforeRenderSchedulerCalled{false};
+        bool m_afterRenderSchedulerCalled{false};
+        bool m_getUpdateTokenCalled{false};
+        std::mutex m_methodsCalledMutex{};
+        std::condition_variable m_methodsCalledCondition{};
     };
 }
