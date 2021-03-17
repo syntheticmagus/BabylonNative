@@ -30,10 +30,28 @@ namespace Babylon
         m_inSafeTimespan = false;
     }
 
-    SafeTimespanGuarantor::SafetyGuarantee SafeTimespanGuarantor::GetSafetyGuarantee()
+    SafeTimespanGuarantor::SafetyGuarantee SafeTimespanGuarantor::BlockingGetSafetyGuarantee()
+    {
+        std::unique_lock lock{m_mutex};
+        return InternalGetSafetyGuarantee(lock);
+    }
+
+    std::optional<SafeTimespanGuarantor::SafetyGuarantee> SafeTimespanGuarantor::TryGetSafetyGuarantee()
+    {
+        std::unique_lock lock{m_mutex};
+        if (m_inSafeTimespan)
+        {
+            return InternalGetSafetyGuarantee(lock);
+        }
+        else
+        {
+            return{};
+        }
+    }
+
+    SafeTimespanGuarantor::SafetyGuarantee SafeTimespanGuarantor::InternalGetSafetyGuarantee(std::unique_lock<std::mutex>& lock)
     {
         // First lock on the underlying mutex and wait until we're in a safe timespan.
-        std::unique_lock lock{m_mutex};
         if (!m_inSafeTimespan)
         {
             m_safetyCondition.wait(lock, [this] { return m_inSafeTimespan; });

@@ -4,6 +4,7 @@
 
 #include <condition_variable>
 #include <mutex>
+#include <optional>
 
 #include <arcana/threading/affinity.h>
 
@@ -18,9 +19,12 @@ namespace Babylon
         void EndSafeTimespan();
 
         using SafetyGuarantee = gsl::final_action<std::function<void()>>;
-        SafetyGuarantee GetSafetyGuarantee();
+        SafetyGuarantee BlockingGetSafetyGuarantee();
+        std::optional<SafetyGuarantee> TryGetSafetyGuarantee();
 
     private:
+        SafetyGuarantee InternalGetSafetyGuarantee(std::unique_lock<std::mutex>&);
+
         uint32_t m_count{};
         std::mutex m_mutex{};
         std::condition_variable m_safetyCondition{};

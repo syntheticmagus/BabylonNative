@@ -33,7 +33,7 @@ namespace Babylon
         private:
             friend class Graphics::Impl;
 
-            UpdateToken(Graphics::Impl&);
+            UpdateToken(Graphics::Impl&, SafeTimespanGuarantor::SafetyGuarantee);
 
             Impl& m_graphicsImpl;
             SafeTimespanGuarantor::SafetyGuarantee m_guarantee;
@@ -42,16 +42,23 @@ namespace Babylon
         class RenderScheduler final
         {
         public:
+            RenderScheduler(std::function<void()> workScheduledCallback)
+                : m_workScheduledCallback{workScheduledCallback}
+            {
+            }
+
             template<typename CallableT>
             void operator()(CallableT&& callable)
             {
                 m_dispatcher(callable);
+                m_workScheduledCallback();
             }
 
         private:
             friend Impl;
 
-            arcana::manual_dispatcher<128> m_dispatcher;
+            arcana::manual_dispatcher<128> m_dispatcher{};
+            std::function<void()> m_workScheduledCallback{};
         };
 
         Impl();
@@ -73,7 +80,7 @@ namespace Babylon
         void StartRenderingCurrentFrame();
         void FinishRenderingCurrentFrame();
 
-        void WaitForWorkToDo();
+        void SetRequestNextFrameCallback(std::function<void()>);
 
         UpdateToken GetUpdateToken();
 
@@ -103,8 +110,12 @@ namespace Babylon
         void EndEncoders();
         void CaptureCallback(const BgfxCallback::CaptureData&);
 
+        void BeforeRenderWorkScheduled();
+        void AfterRenderWorkScheduled();
+        void RequestNextFrame();
+
         arcana::affinity m_renderThreadAffinity{};
-        bool m_rendering{};
+        std::atomic_bool m_rendering{};
 
         std::unique_ptr<arcana::cancellation_source> m_cancellationSource{};
 
@@ -144,10 +155,8 @@ namespace Babylon
         std::map<std::thread::id, bgfx::Encoder*> m_threadIdToEncoder{};
         std::mutex m_threadIdToEncoderMutex{};
 
-        bool m_beforeRenderSchedulerCalled{false};
-        bool m_afterRenderSchedulerCalled{false};
-        bool m_getUpdateTokenCalled{false};
-        std::mutex m_methodsCalledMutex{};
-        std::condition_variable m_methodsCalledCondition{};
+        bool m_nextFrameRequested{false};
+        std::optional<std::function<void()>> m_requestNextFrameCallback{};
+        std::mutex m_nextFrameRequestedMutex{};
     };
 }

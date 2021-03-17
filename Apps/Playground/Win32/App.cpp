@@ -64,8 +64,6 @@ namespace
 
             while (!m_cancelled)
             {
-                m_graphics.WaitForWorkToDo();
-
                 m_graphics.StartRenderingCurrentFrame();
                 m_graphics.FinishRenderingCurrentFrame();
             }

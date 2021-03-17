@@ -70,9 +70,9 @@ namespace Babylon
         m_impl->FinishRenderingCurrentFrame();
     }
 
-    void Graphics::WaitForWorkToDo()
+    void Graphics::SetRequestNextFrameCallback(std::function<void()> callback)
     {
-        m_impl->WaitForWorkToDo();
+        m_impl->SetRequestNextFrameCallback(std::move(callback));
     }
 
     void Graphics::SetDiagnosticOutput(std::function<void(const char* output)> outputFunction)

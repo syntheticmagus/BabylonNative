@@ -9,9 +9,9 @@ namespace
 
 namespace Babylon
 {
-    Graphics::Impl::UpdateToken::UpdateToken(Graphics::Impl& graphicsImpl)
+    Graphics::Impl::UpdateToken::UpdateToken(Graphics::Impl& graphicsImpl, SafeTimespanGuarantor::SafetyGuarantee guarantee)
         : m_graphicsImpl(graphicsImpl)
-        , m_guarantee{m_graphicsImpl.m_safeTimespanGuarantor.GetSafetyGuarantee()}
+        , m_guarantee{std::move(guarantee)}
     {
     }
 
@@ -22,6 +22,8 @@ namespace Babylon
 
     Graphics::Impl::Impl()
         : m_bgfxCallback{[this](const auto& data) { CaptureCallback(data); }}
+        , m_beforeRenderScheduler{[this]() { BeforeRenderWorkScheduled(); }}
+        , m_afterRenderScheduler{[this]() { AfterRenderWorkScheduled(); }}
     {
         std::scoped_lock lock{m_state.Mutex};
         m_state.Bgfx.Initialized = false;
@@ -80,19 +82,11 @@ namespace Babylon
 
     Graphics::Impl::RenderScheduler& Graphics::Impl::BeforeRenderScheduler()
     {
-        std::scoped_lock lock{m_methodsCalledMutex};
-        m_beforeRenderSchedulerCalled = true;
-        m_methodsCalledCondition.notify_one();
-
         return m_beforeRenderScheduler;
     }
 
     Graphics::Impl::RenderScheduler& Graphics::Impl::AfterRenderScheduler()
     {
-        std::scoped_lock lock{m_methodsCalledMutex};
-        m_afterRenderSchedulerCalled = true;
-        m_methodsCalledCondition.notify_one();
-
         return m_afterRenderScheduler;
     }
 
@@ -154,6 +148,11 @@ namespace Babylon
             throw std::runtime_error{"Current frame cannot be started before prior frame has been finished."};
         }
 
+        {
+            std::scoped_lock lock{m_nextFrameRequestedMutex};
+            m_nextFrameRequested = false;
+        }
+
         m_rendering = true;
 
         // Ensure rendering is enabled.
@@ -163,11 +162,6 @@ namespace Babylon
         UpdateBgfxState();
 
         m_safeTimespanGuarantor.BeginSafeTimespan();
-        
-        {
-            std::scoped_lock lock{m_methodsCalledMutex};
-            m_beforeRenderSchedulerCalled = false;
-        }
 
         m_beforeRenderScheduler.m_dispatcher.tick(*m_cancellationSource);
     }
@@ -181,42 +175,33 @@ namespace Babylon
             throw std::runtime_error{"Current frame cannot be finished prior to having been started."};
         }
 
-        {
-            std::scoped_lock lock{m_methodsCalledMutex};
-            m_getUpdateTokenCalled = false;
-        }
-
         m_safeTimespanGuarantor.EndSafeTimespan();
 
         Frame();
 
-        {
-            std::scoped_lock lock{m_methodsCalledMutex};
-            m_afterRenderSchedulerCalled = false;
-        }
+        m_rendering = false;
 
         m_afterRenderScheduler.m_dispatcher.tick(*m_cancellationSource);
-
-        m_rendering = false;
     }
 
-    void Graphics::Impl::WaitForWorkToDo()
+    void Graphics::Impl::SetRequestNextFrameCallback(std::function<void()> callback)
     {
-        std::unique_lock lock{m_methodsCalledMutex};
-        const auto predicate{[this]() { return m_beforeRenderSchedulerCalled || m_afterRenderSchedulerCalled || m_getUpdateTokenCalled; }};
-        if (!predicate())
-        {
-            m_methodsCalledCondition.wait(lock, predicate);
-        }
+        std::scoped_lock lock{m_nextFrameRequestedMutex};
+        m_requestNextFrameCallback = callback;
     }
 
     Graphics::Impl::UpdateToken Graphics::Impl::GetUpdateToken()
     {
-        std::scoped_lock lock{m_methodsCalledMutex};
-        m_getUpdateTokenCalled = true;
-        m_methodsCalledCondition.notify_one();
-
-        return {*this};
+        auto guarantee = m_safeTimespanGuarantor.TryGetSafetyGuarantee();
+        if (guarantee)
+        {
+            return {*this, std::move(guarantee.value())};
+        }
+        else
+        {
+            RequestNextFrame();
+            return {*this, m_safeTimespanGuarantor.BlockingGetSafetyGuarantee()};
+        }
     }
 
     FrameBuffer& Graphics::Impl::AddFrameBuffer(bgfx::FrameBufferHandle handle, uint16_t width, uint16_t height, bool backBuffer)
@@ -404,6 +389,33 @@ namespace Babylon
         for (const auto& callback : m_captureCallbacks)
         {
             callback(data);
+        }
+    }
+
+    void Graphics::Impl::BeforeRenderWorkScheduled()
+    {
+        RequestNextFrame();
+    }
+
+    void Graphics::Impl::AfterRenderWorkScheduled()
+    {
+        if (!m_rendering)
+        {
+            RequestNextFrame();
+        }
+    }
+
+    void Graphics::Impl::RequestNextFrame()
+    {
+        std::scoped_lock lock{m_nextFrameRequestedMutex};
+        if (!m_nextFrameRequested)
+        {
+            if (m_requestNextFrameCallback)
+            {
+                m_requestNextFrameCallback.value()();
+            }
+
+            m_nextFrameRequested = true;
         }
     }
 }
