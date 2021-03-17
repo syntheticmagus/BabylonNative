@@ -20,6 +20,39 @@ namespace Babylon
         return m_graphicsImpl.GetEncoderForThread();
     }
 
+    Graphics::Impl::AutoRenderThread::AutoRenderThread(Graphics::Impl& graphicsImpl)
+        : m_graphicsImpl{graphicsImpl}
+        , m_thread{[this]() { Run(); }}
+    {
+    }
+
+    Graphics::Impl::AutoRenderThread::~AutoRenderThread()
+    {
+        m_cancelSource.cancel();
+        m_thread.join();
+    }
+
+    void Graphics::Impl::AutoRenderThread::Run()
+    {
+        arcana::manual_dispatcher<128> dispatcher{};
+
+        m_graphicsImpl.EnableRendering();
+
+        auto ticket = m_graphicsImpl.AddRequestNextFrameCallback([this, &dispatcher]() {
+            dispatcher.queue([this]() {
+                m_graphicsImpl.StartRenderingCurrentFrame();
+                m_graphicsImpl.FinishRenderingCurrentFrame();
+            });
+        });
+
+        while (!m_cancelSource.cancelled())
+        {
+            dispatcher.blocking_tick(m_cancelSource);
+        }
+
+        m_graphicsImpl.DisableRendering();
+    }
+
     Graphics::Impl::Impl()
         : m_bgfxCallback{[this](const auto& data) { CaptureCallback(data); }}
         , m_beforeRenderScheduler{[this]() { BeforeRenderWorkScheduled(); }}
@@ -36,6 +69,7 @@ namespace Babylon
 
     Graphics::Impl::~Impl()
     {
+        m_autoRenderThread.reset();
         DisableRendering();
     }
 
@@ -184,10 +218,20 @@ namespace Babylon
         m_afterRenderScheduler.m_dispatcher.tick(*m_cancellationSource);
     }
 
-    void Graphics::Impl::SetRequestNextFrameCallback(std::function<void()> callback)
+    Graphics::Impl::RequestNextFrameCallbackTicketT Graphics::Impl::AddRequestNextFrameCallback(std::function<void()> callback)
     {
         std::scoped_lock lock{m_nextFrameRequestedMutex};
-        m_requestNextFrameCallback = callback;
+        return m_nextFrameRequestCallbacks.insert(std::move(callback), m_nextFrameRequestCallbacksMutex);
+    }
+
+    void Graphics::Impl::StartAutoRendering()
+    {
+        m_autoRenderThread.emplace(*this);
+    }
+
+    void Graphics::Impl::StopAutoRendering()
+    {
+        m_autoRenderThread.reset();
     }
 
     Graphics::Impl::UpdateToken Graphics::Impl::GetUpdateToken()
@@ -410,9 +454,9 @@ namespace Babylon
         std::scoped_lock lock{m_nextFrameRequestedMutex};
         if (!m_nextFrameRequested)
         {
-            if (m_requestNextFrameCallback)
+            for (const auto& callback : m_nextFrameRequestCallbacks)
             {
-                m_requestNextFrameCallback.value()();
+                callback();
             }
 
             m_nextFrameRequested = true;

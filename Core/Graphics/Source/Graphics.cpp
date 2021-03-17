@@ -70,9 +70,29 @@ namespace Babylon
         m_impl->FinishRenderingCurrentFrame();
     }
 
-    void Graphics::SetRequestNextFrameCallback(std::function<void()> callback)
+    struct Graphics::CallbackTicket
     {
-        m_impl->SetRequestNextFrameCallback(std::move(callback));
+        CallbackTicket(Graphics::Impl::RequestNextFrameCallbackTicketT ticket)
+            : Ticket{std::move(ticket)}
+        {
+        }
+
+        Graphics::Impl::RequestNextFrameCallbackTicketT Ticket;
+    };
+
+    std::unique_ptr<Graphics::CallbackTicket> Graphics::SetRequestNextFrameCallback(std::function<void()> callback)
+    {
+        return std::make_unique<CallbackTicket>(m_impl->AddRequestNextFrameCallback(std::move(callback)));
+    }
+
+    void Graphics::StartAutoRendering()
+    {
+        m_impl->StartAutoRendering();
+    }
+
+    void Graphics::StopAutoRendering()
+    {
+        m_impl->StopAutoRendering();
     }
 
     void Graphics::SetDiagnosticOutput(std::function<void(const char* output)> outputFunction)

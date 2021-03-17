@@ -61,6 +61,20 @@ namespace Babylon
             std::function<void()> m_workScheduledCallback{};
         };
 
+        class AutoRenderThread
+        {
+        public:
+            AutoRenderThread(Graphics::Impl&);
+            ~AutoRenderThread();
+
+        private:
+            Graphics::Impl& m_graphicsImpl;
+            std::thread m_thread{};
+            arcana::cancellation_source m_cancelSource{};
+
+            void Run();
+        };
+
         Impl();
         ~Impl();
 
@@ -80,7 +94,11 @@ namespace Babylon
         void StartRenderingCurrentFrame();
         void FinishRenderingCurrentFrame();
 
-        void SetRequestNextFrameCallback(std::function<void()>);
+        using RequestNextFrameCallbackTicketT = arcana::ticketed_collection<std::function<void()>>::ticket;
+        RequestNextFrameCallbackTicketT AddRequestNextFrameCallback(std::function<void()>);
+
+        void StartAutoRendering();
+        void StopAutoRendering();
 
         UpdateToken GetUpdateToken();
 
@@ -156,7 +174,11 @@ namespace Babylon
         std::mutex m_threadIdToEncoderMutex{};
 
         bool m_nextFrameRequested{false};
-        std::optional<std::function<void()>> m_requestNextFrameCallback{};
         std::mutex m_nextFrameRequestedMutex{};
+
+        arcana::ticketed_collection<std::function<void()>> m_nextFrameRequestCallbacks{};
+        std::mutex m_nextFrameRequestCallbacksMutex{};
+
+        std::optional<AutoRenderThread> m_autoRenderThread{};
     };
 }

@@ -29,7 +29,12 @@ namespace Babylon
         void StartRenderingCurrentFrame();
         void FinishRenderingCurrentFrame();
 
-        void SetRequestNextFrameCallback(std::function<void()>);
+        struct CallbackTicket;
+        std::unique_ptr<CallbackTicket> SetRequestNextFrameCallback(std::function<void()>);
+
+        void StartAutoRendering();
+        void StopAutoRendering();
+
         void SetDiagnosticOutput(std::function<void(const char* output)> outputFunction);
 
         float GetHardwareScalingLevel();

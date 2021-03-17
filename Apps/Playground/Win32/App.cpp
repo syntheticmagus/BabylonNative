@@ -119,7 +119,7 @@ namespace
         inputBuffer.reset();
         runtime.reset();
 
-        graphicsThread.reset();
+        //graphicsThread.reset();
         graphics.reset();
     }
 
@@ -137,7 +137,8 @@ namespace
         auto height = static_cast<size_t>(rect.bottom - rect.top);
         graphics = Babylon::Graphics::CreateGraphics<void*>(hWnd, width, height);
 
-        graphicsThread = std::make_unique<GraphicsThread>(*graphics);
+        graphics->StartAutoRendering();
+        //graphicsThread = std::make_unique<GraphicsThread>(*graphics);
         
         runtime = std::make_unique<Babylon::AppRuntime>();
         inputBuffer = std::make_unique<InputManager<Babylon::AppRuntime>::InputBuffer>(*runtime);
@@ -354,7 +355,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         }
         case WM_SIZE:
         {
-            if (graphicsThread)
+            if (graphics)
             {
                 auto width = static_cast<size_t>(LOWORD(lParam));
                 auto height = static_cast<size_t>(HIWORD(lParam));
