@@ -2,6 +2,22 @@
 
 namespace Babylon
 {
+    SafeTimespanGuarantor::SafetyGuarantee::SafetyGuarantee(SafetyGuarantee&& other) noexcept
+        : m_finalAction{}
+    {
+        *this = std::move(other);
+    }
+
+    SafeTimespanGuarantor::SafetyGuarantee& SafeTimespanGuarantor::SafetyGuarantee::operator=(SafetyGuarantee&& other) noexcept
+    {
+        m_finalAction.reset();
+        if (other.m_finalAction)
+        {
+            m_finalAction.emplace(std::move(other.m_finalAction.value()));
+        }
+        return *this;
+    }
+
     SafeTimespanGuarantor::SafeTimespanGuarantor()
         : m_inSafeTimespan{false}
     {
@@ -9,11 +25,14 @@ namespace Babylon
 
     void SafeTimespanGuarantor::BeginSafeTimespan()
     {
+        std::scoped_lock lock{m_mutex};
+        m_inSafeTimespan = true;
+
+        for (auto& promise : m_promises)
         {
-            std::scoped_lock lock{m_mutex};
-            m_inSafeTimespan = true;
+            promise.set_value(InternalGetSafetyGuarantee());
         }
-        m_safetyCondition.notify_all();
+        m_promises.clear();
     }
 
     void SafeTimespanGuarantor::EndSafeTimespan()
@@ -30,47 +49,44 @@ namespace Babylon
         m_inSafeTimespan = false;
     }
 
-    SafeTimespanGuarantor::SafetyGuarantee SafeTimespanGuarantor::BlockingGetSafetyGuarantee()
+    std::future<SafeTimespanGuarantor::SafetyGuarantee> SafeTimespanGuarantor::GetSafetyGuarantee()
     {
-        std::unique_lock lock{m_mutex};
-        return InternalGetSafetyGuarantee(lock);
-    }
-
-    std::optional<SafeTimespanGuarantor::SafetyGuarantee> SafeTimespanGuarantor::TryGetSafetyGuarantee()
-    {
-        std::unique_lock lock{m_mutex};
+        std::scoped_lock lock{m_mutex};
+        std::promise<SafetyGuarantee> promise{};
+        auto future{promise.get_future()};
         if (m_inSafeTimespan)
         {
-            return InternalGetSafetyGuarantee(lock);
+            promise.set_value(InternalGetSafetyGuarantee());
         }
         else
         {
-            return{};
+            m_promises.push_back(std::move(promise));
         }
+        return future;
     }
 
-    SafeTimespanGuarantor::SafetyGuarantee SafeTimespanGuarantor::InternalGetSafetyGuarantee(std::unique_lock<std::mutex>& lock)
+    bool SafeTimespanGuarantor::IsCurrentTimespanSafe()
     {
-        // First lock on the underlying mutex and wait until we're in a safe timespan.
-        if (!m_inSafeTimespan)
-        {
-            m_safetyCondition.wait(lock, [this] { return m_inSafeTimespan; });
-        }
+        std::scoped_lock lock{m_mutex};
+        return m_inSafeTimespan;
+    }
 
+    SafeTimespanGuarantor::SafetyGuarantee SafeTimespanGuarantor::InternalGetSafetyGuarantee()
+    {
         // Increment the outstanding SafetyGuarantee count.
         m_count++;
 
         // Then return a SafeteyGuarantee that should be held until caller operations are complete.
-        return gsl::finally(std::function<void()>{ [this]
-        {
-            // First lock the underlying mutex and decrement the outstanding SafeteyGuarantee count.
-            {
-                std::scoped_lock lock{m_mutex};
-                m_count--;
-            }
+        return {
+            std::function<void()>{[this]() {
+                // First lock the underlying mutex and decrement the outstanding SafeteyGuarantee count.
+                {
+                    std::scoped_lock lock{m_mutex};
+                    m_count--;
+                }
 
-            // Then signal the condition variable to recheck the condition.
-            m_endCondition.notify_one();
-        }});
+                // Then signal the condition variable to recheck the condition.
+                m_endCondition.notify_one();
+            }}};
     }
 }

@@ -38,12 +38,16 @@ namespace Babylon
 
         m_graphicsImpl.EnableRendering();
 
-        auto ticket = m_graphicsImpl.AddRequestNextFrameCallback([this, &dispatcher]() {
+        auto nextFrameRequestTicket = m_graphicsImpl.AddRequestNextFrameCallback([this, &dispatcher]() {
             dispatcher.queue([this]() {
                 m_graphicsImpl.StartRenderingCurrentFrame();
                 m_graphicsImpl.FinishRenderingCurrentFrame();
             });
         });
+
+        auto cancelTicket{m_cancelSource.add_listener([&dispatcher]() {
+            dispatcher.cancelled();
+        })};
 
         while (!m_cancelSource.cancelled())
         {
@@ -236,16 +240,12 @@ namespace Babylon
 
     Graphics::Impl::UpdateToken Graphics::Impl::GetUpdateToken()
     {
-        auto guarantee = m_safeTimespanGuarantor.TryGetSafetyGuarantee();
-        if (guarantee)
-        {
-            return {*this, std::move(guarantee.value())};
-        }
-        else
+        auto guarantee = m_safeTimespanGuarantor.GetSafetyGuarantee();
+        if (!m_safeTimespanGuarantor.IsCurrentTimespanSafe())
         {
             RequestNextFrame();
-            return {*this, m_safeTimespanGuarantor.BlockingGetSafetyGuarantee()};
         }
+        return {*this, guarantee.get()};
     }
 
     FrameBuffer& Graphics::Impl::AddFrameBuffer(bgfx::FrameBufferHandle handle, uint16_t width, uint16_t height, bool backBuffer)

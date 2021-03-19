@@ -4,7 +4,7 @@
 
 #include <condition_variable>
 #include <mutex>
-#include <optional>
+#include <future>
 
 #include <arcana/threading/affinity.h>
 
@@ -18,17 +18,34 @@ namespace Babylon
         void BeginSafeTimespan();
         void EndSafeTimespan();
 
-        using SafetyGuarantee = gsl::final_action<std::function<void()>>;
-        SafetyGuarantee BlockingGetSafetyGuarantee();
-        std::optional<SafetyGuarantee> TryGetSafetyGuarantee();
+        class SafetyGuarantee
+        {
+        public:
+            SafetyGuarantee(std::function<void()> callback)
+                : m_finalAction{std::move(callback)}
+            {
+            }
+
+            SafetyGuarantee() = default;
+            SafetyGuarantee(const SafetyGuarantee&) = delete;
+            SafetyGuarantee& operator=(const SafetyGuarantee&) = delete;
+            SafetyGuarantee(SafetyGuarantee&&) noexcept;
+            SafetyGuarantee& operator=(SafetyGuarantee&&) noexcept;
+        
+        private:
+            std::optional<gsl::final_action<std::function<void()>>> m_finalAction{};
+        };
+
+        std::future<SafetyGuarantee> GetSafetyGuarantee();
+        bool IsCurrentTimespanSafe();
 
     private:
-        SafetyGuarantee InternalGetSafetyGuarantee(std::unique_lock<std::mutex>&);
+        SafetyGuarantee InternalGetSafetyGuarantee();
 
         uint32_t m_count{};
         std::mutex m_mutex{};
-        std::condition_variable m_safetyCondition{};
-        std::condition_variable m_endCondition{};
         bool m_inSafeTimespan{};
+        std::vector<std::promise<SafetyGuarantee>> m_promises{};
+        std::condition_variable m_endCondition{};
     };
 }
